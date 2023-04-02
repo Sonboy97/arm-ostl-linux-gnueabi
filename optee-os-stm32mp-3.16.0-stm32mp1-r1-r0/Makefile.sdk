@@ -1,0 +1,126 @@
+# Set default path
+SRC_PATH ?= $(PWD)
+BLD_PATH ?= $(SRC_PATH)/../build
+DEPLOYDIR ?= $(SRC_PATH)/../deploy
+
+# Set default optee-os config
+CFG_EMBED_DTB_SOURCE_FILE ?=  stm32mp157d-dk1 stm32mp157d-100ask
+OPTEE_DRAMSIZE ?=
+OPTEE_DRAMSIZE_EV ?= 0x40000000
+OPTEE_DRAMSIZE_DK ?= 0x20000000
+
+# Remove default variables
+LDFLAGS =
+CFLAGS =
+CPPFLAGS =
+# Define default make options
+EXTRA_OEMAKE = PLATFORM=stm32mp1 CROSS_COMPILE_core=arm-ostl-linux-gnueabi- CROSS_COMPILE_ta_arm64=arm-ostl-linux-gnueabi- CFG_ARM32_core=y CROSS_COMPILE_ta_arm32=arm-ostl-linux-gnueabi- NOWERROR=1 LDFLAGS= CFG_TEE_CORE_LOG_LEVEL=2 CFG_TEE_CORE_DEBUG=y
+
+# Check that provided devicetree file follow the default naming rules:
+#   devicetree name should contains the original stm32mp devicetree name to allow proper auto-configuration
+check_dt:= $(shell \
+	for dt in $(CFG_EMBED_DTB_SOURCE_FILE); do \
+		match_naming="$$dt" ; \
+		for stdt in   stm32mp157a-dk1 stm32mp157d-100ask stm32mp157d-dk1 stm32mp157c-dk2 stm32mp157f-dk2 stm32mp135d-dk stm32mp135f-dk   stm32mp157c-ed1 stm32mp157f-ed1   stm32mp157a-ev1 stm32mp157c-ev1 stm32mp157d-ev1 stm32mp157f-ev1  ; do \
+			if [ "$$(echo $$dt | grep -cE "$$stdt$$|$$stdt-")" -eq 1 ]; then \
+				match_naming="" ; \
+				break ; \
+			fi ; \
+		done ; \
+		echo $$match_naming ; \
+	done)
+
+ifneq ($(check_dt),)
+ifeq ($(OPTEE_DRAMSIZE),)
+$(error Devicetree name "$(check_dt)" is not compatible with optee-os-stm32mp auto configuration switch: you should configure OPTEE_DRAMSIZE by yourself)
+endif
+endif
+
+# Set dependencies list for building all
+DEPS = optee
+DEPS += fip
+
+help:
+	@echo
+	@echo "OPTEE-OS configuration:"
+	@echo "  CFG_EMBED_DTB_SOURCE_FILE = $(CFG_EMBED_DTB_SOURCE_FILE)"
+	@echo "  DRAM size setting:"
+	@for dt in $(CFG_EMBED_DTB_SOURCE_FILE); do \
+		if [ -n "$(OPTEE_DRAMSIZE)" ]; then 			dramsize_config="OPTEE_DRAMSIZE = $(OPTEE_DRAMSIZE)" ; 		else 			dramsize_config="OPTEE_DRAMSIZE_EV = $(OPTEE_DRAMSIZE_EV)" ; \
+			for dk in  stm32mp157a-dk1 stm32mp157d-100ask stm32mp157d-dk1 stm32mp157c-dk2 stm32mp157f-dk2 stm32mp135d-dk stm32mp135f-dk ; do \
+				if [ "$$(echo $$dt | grep -cE "$$dk$$|$$dk-")" -eq 1 ]; then \
+					dramsize_config="OPTEE_DRAMSIZE_DK = $(OPTEE_DRAMSIZE_DK)" ; \
+					break ; \
+				fi ; \
+			done ; \
+		fi ; \
+		echo "    $$dt : $$dramsize_config" ; \
+	done
+	@echo
+	@echo "OPTEE-OS folder configuration:"
+	@echo "  SRC_PATH  = $(SRC_PATH)"
+	@echo "  BLD_PATH  = $(BLD_PATH)"
+	@echo "  DEPLOYDIR = $(DEPLOYDIR)"
+	@echo
+	@echo "FIP configuration:"
+	@echo "  Do not forget to set FIP deploydir folders (such as FIP_DEPLOYDIR_ROOT) to provide path to needed binaries"
+	@echo
+	@echo "Available targets:"
+	@echo "  all   : default target to build all binaries for defined config(s)"
+	@echo "  fip   : build FIP binaries for defined config(s)"
+	@echo "  optee : build OPTEE-OS binaries for defined config(s)"
+	@echo "  clean : clean build directories from generated files"
+	@echo
+
+all: $(DEPS)
+
+optee:
+	@mkdir -p $(DEPLOYDIR)
+	@mkdir -p $(DEPLOYDIR)/debug
+	@if [ -n "$(CFG_EMBED_DTB_SOURCE_FILE)" ]; then \
+		for dt in $(CFG_EMBED_DTB_SOURCE_FILE); do \
+			# Configure SOC switch \
+			soc_extra="" ; \
+			for soc in  stm32mp15  stm32mp13  ; do \
+				if [ "$$(echo $$dt | grep -c $$soc)" -eq 1 ]; then \
+					soc_extra="$$(echo CFG_$$soc | tr a-z A-Z)=y" ; \
+					break ; \
+				fi ; \
+			done ; \
+			# Configure DRAM_SIZE switch \
+			if [ -n "$(OPTEE_DRAMSIZE)" ]; then \
+				dramsize="$(OPTEE_DRAMSIZE)" ; \
+			else \
+				dramsize="$(OPTEE_DRAMSIZE_EV)" ; \
+				for dk in  stm32mp157a-dk1 stm32mp157d-100ask stm32mp157d-dk1 stm32mp157c-dk2 stm32mp157f-dk2 stm32mp135d-dk stm32mp135f-dk ; do \
+					if [ "$$(echo $$dt | grep -cE "$$dk$$|$$dk-")" -eq 1 ]; then \
+						dramsize="$(OPTEE_DRAMSIZE_DK)" ; \
+						break ; \
+					fi ; \
+				done ; \
+			fi ; \
+			$(MAKE) $(EXTRA_OEMAKE) -C $(SRC_PATH) PREFIX=$(SDKTARGETSYSROOT) O=$(BLD_PATH)/$$dt CFG_EMBED_DTB_SOURCE_FILE=$$dt.dts CFG_DRAM_SIZE=$$dramsize $$soc_extra ; \
+			# Copy binary files with explicit name \
+			cp $(BLD_PATH)/$$dt/core/tee-header_v2.bin $(DEPLOYDIR)/tee-header_v2-$$dt.bin ; \
+			cp $(BLD_PATH)/$$dt/core/tee-pager_v2.bin $(DEPLOYDIR)/tee-pager_v2-$$dt.bin ; \
+			cp $(BLD_PATH)/$$dt/core/tee-pageable_v2.bin $(DEPLOYDIR)/tee-pageable_v2-$$dt.bin ; \
+			cp $(BLD_PATH)/$$dt/core/tee.elf $(DEPLOYDIR)/debug/tee-$$dt.elf ; \
+		done ; \
+	else \
+		$(MAKE) $(EXTRA_OEMAKE) -C $(SRC_PATH) PREFIX=$(SDKTARGETSYSROOT) O=$(BLD_PATH)/ ; \
+		# Copy binary files with explicit name \
+		cp $(BLD_PATH)/core/tee-header_v2.bin $(DEPLOYDIR)/ ; \
+		cp $(BLD_PATH)/core/tee-pager_v2.bin $(DEPLOYDIR)/ ; \
+		cp $(BLD_PATH)/core/tee-pageable_v2.bin $(DEPLOYDIR)/ ; \
+		cp $(BLD_PATH)/core/tee.elf $(DEPLOYDIR)/debug/ ; \
+	fi
+
+fip: optee
+	FIP_DEPLOYDIR_OPTEE=$(DEPLOYDIR) FIP_DEVICETREE="$(CFG_EMBED_DTB_SOURCE_FILE)" FIP_CONFIG="optee" FIP_BL32_CONF="optee" fiptool-stm32mp
+
+clean:
+	@echo "Removing $(BLD_PATH) ..."
+	@rm -rf $(BLD_PATH)
+	@echo "Removing $(DEPLOYDIR) ..."
+	@rm -rf $(DEPLOYDIR)
+	@echo
