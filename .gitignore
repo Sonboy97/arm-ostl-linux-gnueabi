@@ -2,4 +2,9 @@ buildroot-2022.02.5/build
 optee-os-stm32mp-3.16.0-stm32mp1-r1-r0/build
 tf-a-stm32mp-v2.6-stm32mp1-r1-r0/build
 u-boot-stm32mp-v2021.10-stm32mp1-r1-r0/build
-
+FIP_artifacts/arm-trusted-firmware
+FIP_artifacts/optee
+FIP_artifacts/u-boot
+FIP_artifacts/fip
+FIP_artifacts/bootfs.ext4
+FIP_artifacts/rootfs.ext4

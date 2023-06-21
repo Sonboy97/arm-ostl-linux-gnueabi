@@ -353,7 +353,7 @@
 	st,neg-edge;
 	bus-width = <4>;
 	vmmc-supply = <&v3v3>;
-	status = "disabled";
+	status = "okay";
 };
 
 &spi4 {
